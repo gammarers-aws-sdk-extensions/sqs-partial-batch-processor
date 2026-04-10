@@ -28,7 +28,8 @@
     "target": "ES2020",
     "types": [
       "jest",
-      "node"
+      "node",
+      "aws-lambda"
     ]
   },
   "include": [
