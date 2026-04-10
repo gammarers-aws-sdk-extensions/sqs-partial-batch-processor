@@ -1,4 +1,5 @@
 import { javascript, typescript, github } from 'projen';
+
 const project = new typescript.TypeScriptProject({
   defaultReleaseBranch: 'main',
   name: 'sqs-partial-batch-processor',
@@ -14,7 +15,7 @@ const project = new typescript.TypeScriptProject({
   minNodeVersion: '20.0.0',
   workflowNodeVersion: '24.x',
   deps: [
-    '@aws-sdk/client-sqs@^3.983.0',
+    '@types/aws-lambda@^8.10.145',
   ],
   depsUpgradeOptions: {
     workflowOptions: {
@@ -38,7 +39,5 @@ const project = new typescript.TypeScriptProject({
     ],
   },
 });
-// package ignore .devcontainer directory
 project.addPackageIgnore('/.devcontainer');
-// do synth
 project.synth();
