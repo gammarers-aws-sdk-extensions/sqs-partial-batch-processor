@@ -19,7 +19,7 @@ This library intentionally does **not** parse message bodies, validate schemas, 
 
 - Node.js **20+**
 - Lambda SQS event source mapping has **Report batch item failures** enabled.
-  See the AWS docs: https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html#services-sqs-batchfailurereporting
+  See: [AWS Lambda SQS error handling docs](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html#services-sqs-batchfailurereporting)
 
 ## Installation
 
@@ -63,7 +63,7 @@ export const handler = async (event: SQSEvent) =>
 
 Both `processPartialBatch` and `processPartialBatchWithResult` accept an optional `options` object:
 
-- `concurrency?: number` (default: `1`): bounded parallelism. Order of `batchItemFailures` is not guaranteed.
+- `concurrency?: number` (default: `1`): maximum parallelism. Must be a finite integer `>= 1` (`1` = sequential, `> 1` = bounded concurrency). If invalid, the function throws (`RangeError` for `< 1`, `TypeError` for non-integer / non-finite).
 - `onRecordError?: (record, error) => void`: called when a record is treated as failed (useful for logging/metrics).
 - `mapMessageId?: (record) => string`: customize the `itemIdentifier` (defaults to `record.messageId`).
 
