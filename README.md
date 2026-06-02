@@ -17,7 +17,8 @@ This library intentionally does **not** parse message bodies, validate schemas, 
 
 ## Requirements
 
-- Node.js **20+**
+- Node.js **20+** (runtime requirement)
+- Module system: published as **CommonJS** (`"module": "CommonJS"`). Usable from both CJS and ESM runtimes.
 - Lambda SQS event source mapping has **Report batch item failures** enabled.
   See: [AWS Lambda SQS error handling docs](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html#services-sqs-batchfailurereporting)
 
@@ -64,8 +65,37 @@ export const handler = async (event: SQSEvent) =>
 Both `processPartialBatch` and `processPartialBatchWithResult` accept an optional `options` object:
 
 - `concurrency?: number` (default: `1`): maximum parallelism. Must be a finite integer `>= 1` (`1` = sequential, `> 1` = bounded concurrency). If invalid, the function throws (`RangeError` for `< 1`, `TypeError` for non-integer / non-finite).
-- `onRecordError?: (record, error) => void`: called when a record is treated as failed (useful for logging/metrics).
+  - **Tip**: start with `1` and increase gradually while watching downstream limits (external API rate limits, DB connection pools, and Lambda reserved concurrency). SQS batches are typically small, so a large value rarely helps.
+  - **Note**: when `concurrency > 1`, the order of `batchItemFailures` is **not guaranteed**. Tests should compare as a set, not by array order.
+- `onRecordError?: (record, error) => void`: called when a record is treated as failed (useful for structured logs / metrics).
+  - Example (structured log / metrics hook):
+
+```ts
+import { processPartialBatch } from 'sqs-partial-batch-processor';
+import type { SQSEvent } from 'aws-lambda';
+
+export const handler = async (event: SQSEvent) =>
+  processPartialBatch(
+    event,
+    async (record) => {
+      // ...
+    },
+    {
+      onRecordError: (record, error) => {
+        console.log(JSON.stringify({
+          level: 'error',
+          msg: 'record failed',
+          messageId: record.messageId,
+          // Avoid logging sensitive contents from record.body.
+          error: error instanceof Error ? { name: error.name, message: error.message } : { message: String(error) },
+        }));
+      },
+    },
+  );
+```
+
 - `mapMessageId?: (record) => string`: customize the `itemIdentifier` (defaults to `record.messageId`).
+  - Typical uses: align the identifier with an **application-level id** (e.g., an id stored in `messageAttributes` or the parsed payload), or normalize identifiers across FIFO/standard queues for easier correlation.
 
 ## License
 
