@@ -28,6 +28,16 @@ function event(...records: SQSRecord[]): SQSEvent {
 }
 
 describe('processPartialBatch', () => {
+  it.each([0, -1, -10])('throws RangeError for invalid concurrency (%s)', async (c) => {
+    const e = event(sqsRecord('a'));
+    await expect(processPartialBatch(e, async () => {}, { concurrency: c })).rejects.toThrow(RangeError);
+  });
+
+  it.each([0.5, Number.NaN, Number.POSITIVE_INFINITY])('throws TypeError for non-integer or non-finite concurrency (%s)', async (c) => {
+    const e = event(sqsRecord('a'));
+    await expect(processPartialBatch(e, async () => {}, { concurrency: c })).rejects.toThrow(TypeError);
+  });
+
   it('returns empty batchItemFailures when all records succeed', async () => {
     const e = event(sqsRecord('a'), sqsRecord('b'));
     const fn = jest.fn(async () => {});
@@ -101,6 +111,16 @@ describe('processPartialBatch', () => {
 });
 
 describe('processPartialBatchWithResult', () => {
+  it.each([0, -1, -10])('throws RangeError for invalid concurrency (%s)', async (c) => {
+    const e = event(sqsRecord('a'));
+    await expect(processPartialBatchWithResult(e, async () => ({ ok: true }), { concurrency: c })).rejects.toThrow(RangeError);
+  });
+
+  it.each([0.5, Number.NaN, Number.POSITIVE_INFINITY])('throws TypeError for non-integer or non-finite concurrency (%s)', async (c) => {
+    const e = event(sqsRecord('a'));
+    await expect(processPartialBatchWithResult(e, async () => ({ ok: true }), { concurrency: c })).rejects.toThrow(TypeError);
+  });
+
   it('maps ok: false to failures without throw', async () => {
     const e = event(sqsRecord('a'), sqsRecord('b'));
     const out = await processPartialBatchWithResult(e, async (r) => {
