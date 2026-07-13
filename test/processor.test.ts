@@ -147,7 +147,31 @@ describe('processPartialBatchWithResult', () => {
     );
     expect(onRecordError).toHaveBeenCalledTimes(1);
     expect(onRecordError.mock.calls[0]?.[0].messageId).toBe('b');
-    expect(onRecordError.mock.calls[0]?.[1]).toBeInstanceOf(Error);
+    const err = onRecordError.mock.calls[0]?.[1];
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toMatchObject({
+      message: 'processRecord returned { ok: false } (itemIdentifier=b)',
+      cause: { itemIdentifier: 'b' },
+    });
+  });
+
+  it('includes mapMessageId result in onRecordError for { ok: false }', async () => {
+    const onRecordError = jest.fn();
+    const e = event(sqsRecord('raw-id'));
+    await processPartialBatchWithResult(
+      e,
+      async () => ({ ok: false }),
+      {
+        onRecordError,
+        mapMessageId: (r) => `app:${r.messageId}`,
+      },
+    );
+    expect(onRecordError).toHaveBeenCalledTimes(1);
+    const err = onRecordError.mock.calls[0]?.[1];
+    expect(err).toMatchObject({
+      message: 'processRecord returned { ok: false } (itemIdentifier=app:raw-id)',
+      cause: { itemIdentifier: 'app:raw-id' },
+    });
   });
 
   it('aggregates failures with concurrency (order not asserted)', async () => {
