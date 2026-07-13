@@ -12,13 +12,15 @@ This library intentionally does **not** parse message bodies, validate schemas, 
 
 - Implements Lambda SQS **partial batch response** pattern (only failed messages are retried).
 - Per-record error boundary (failures are isolated to each record).
-- Aggregates failed `messageId`s into `batchItemFailures`.
-- Optional bounded concurrency (`concurrency`) and error hook (`onRecordError`).
+- Aggregates failed identifiers into `batchItemFailures` (defaults to `messageId`).
+- Throw-style (`processPartialBatch`) and Result-style (`processPartialBatchWithResult`) APIs.
+- Optional bounded concurrency (`concurrency`), error hook (`onRecordError`), and custom `itemIdentifier` mapping (`mapMessageId`).
+- For `{ ok: false }`, `onRecordError` receives an `Error` that includes the resolved `itemIdentifier` (message and `cause`) for easier debugging.
 
 ## Requirements
 
 - Node.js **20+** (runtime requirement)
-- Module system: published as **CommonJS** (`"module": "CommonJS"`). Usable from both CJS and ESM runtimes.
+- Module system: published as **CommonJS** (`"main": "lib/index.js"`). Usable from both CJS and ESM runtimes.
 - Lambda SQS event source mapping has **Report batch item failures** enabled.
   See: [AWS Lambda SQS error handling docs](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html#services-sqs-batchfailurereporting)
 
@@ -33,6 +35,8 @@ yarn add sqs-partial-batch-processor
 ```
 
 ## Usage
+
+Throw to mark a record as failed:
 
 ```ts
 import type { SQSEvent } from 'aws-lambda';
@@ -68,6 +72,8 @@ Both `processPartialBatch` and `processPartialBatchWithResult` accept an optiona
   - **Tip**: start with `1` and increase gradually while watching downstream limits (external API rate limits, DB connection pools, and Lambda reserved concurrency). SQS batches are typically small, so a large value rarely helps.
   - **Note**: when `concurrency > 1`, the order of `batchItemFailures` is **not guaranteed**. Tests should compare as a set, not by array order.
 - `onRecordError?: (record, error) => void`: called when a record is treated as failed (useful for structured logs / metrics).
+  - **Caution**: do **not** log `record.body` as-is in `onRecordError`. Message bodies often contain secrets or personal data. Prefer `messageId` / your `mapMessageId` result and a sanitized error summary.
+  - When `processPartialBatchWithResult` receives `{ ok: false }`, the hook gets an `Error` whose message (and `cause.itemIdentifier`) includes the resolved `itemIdentifier` for easier debugging.
   - Example (structured log / metrics hook):
 
 ```ts
@@ -86,7 +92,7 @@ export const handler = async (event: SQSEvent) =>
           level: 'error',
           msg: 'record failed',
           messageId: record.messageId,
-          // Avoid logging sensitive contents from record.body.
+          // Do not log record.body — it may contain secrets or PII.
           error: error instanceof Error ? { name: error.name, message: error.message } : { message: String(error) },
         }));
       },
@@ -99,4 +105,4 @@ export const handler = async (event: SQSEvent) =>
 
 ## License
 
-This project is licensed under the (Apache-2.0) License.
+This project is licensed under the Apache-2.0 License.

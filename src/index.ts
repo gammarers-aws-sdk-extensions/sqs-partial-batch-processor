@@ -8,30 +8,46 @@ export interface ProcessPartialBatchOptions {
    * Maximum number of records processed in parallel.
    *
    * - `1`: sequential processing
-   * - `> 1`: bounded concurrency pool (order of `batchItemFailures` is not guaranteed)
+   * - `> 1`: bounded concurrency pool (order of {@link SQSBatchResponse.batchItemFailures} is not guaranteed)
    *
+   * @default 1
    * @throws {RangeError} When `concurrency` is less than 1.
    * @throws {TypeError} When `concurrency` is not a finite integer.
-   * Order of entries in {@link SQSBatchResponse.batchItemFailures} is not guaranteed.
-   * @default 1
    */
   readonly concurrency?: number;
 
   /**
    * Called when a record is treated as failed (thrown error or `{ ok: false }`).
-   * Use for logging; the library does not write to `console` by default.
+   * Use for logging or metrics; the library does not write to `console` by default.
+   *
+   * For `{ ok: false }` from {@link processPartialBatchWithResult}, `error` is an `Error`
+   * whose message includes the resolved `itemIdentifier`, and whose `cause` is
+   * `{ itemIdentifier }` for structured logging.
+   *
+   * Do not log `record.body` as-is — it may contain secrets or personal data.
+   * Prefer identifiers such as `record.messageId` (or your `mapMessageId` result)
+   * and a sanitized error summary.
+   *
+   * @param record The failed SQS record.
+   * @param error The thrown value, or a synthesized `Error` when `{ ok: false }` was returned.
    */
   readonly onRecordError?: (record: SQSRecord, error: unknown) => void;
 
   /**
-   * Returns the value for `itemIdentifier` for a record. Defaults to `record.messageId`.
+   * Returns the `itemIdentifier` reported in `batchItemFailures` for a record.
+   * Defaults to `record.messageId` when omitted.
+   *
+   * @param record The SQS record being processed.
+   * @returns The identifier sent back to Lambda in `batchItemFailures`.
    */
   readonly mapMessageId?: (record: SQSRecord) => string;
 }
 
 /**
  * Creates a single `batchItemFailures` entry for a failed record.
+ *
  * @param itemIdentifier The identifier reported back to Lambda.
+ * @returns An object suitable for {@link SQSBatchResponse.batchItemFailures}.
  */
 const itemFailure = (itemIdentifier: string): { itemIdentifier: string } => ({
   itemIdentifier,
@@ -65,6 +81,7 @@ const resolveConcurrency = (value: number | undefined): number => {
  * @param items Items to process.
  * @param concurrency Maximum parallel workers (must be `>= 1`).
  * @param fn Async handler invoked for each item.
+ * @returns A promise that resolves when every item has been processed.
  */
 const runWithConcurrency = async <T>(
   items: readonly T[],
@@ -77,6 +94,11 @@ const runWithConcurrency = async <T>(
   const limit = Math.min(concurrency, items.length);
   let next = 0;
 
+  /**
+   * Claims the next work index, or `undefined` when the queue is empty.
+   *
+   * @returns The next index to process, or `undefined` if none remain.
+   */
   const takeNextIndex = (): number | undefined => {
     const index = next;
     next += 1;
@@ -106,6 +128,13 @@ const runWithConcurrency = async <T>(
 /**
  * Runs `processRecord` for each SQS record. Thrown errors are mapped to
  * `batchItemFailures`; successful records are not listed.
+ *
+ * @param event The SQS Lambda event.
+ * @param processRecord Per-record handler. Throw to mark only that record as failed.
+ * @param options Optional concurrency, error hook, and message id mapping.
+ * @returns An {@link SQSBatchResponse} listing only failed `itemIdentifier`s.
+ * @throws {RangeError} When `options.concurrency` is less than 1.
+ * @throws {TypeError} When `options.concurrency` is not a finite integer.
  */
 export const processPartialBatch = async (
   event: SQSEvent,
@@ -115,6 +144,11 @@ export const processPartialBatch = async (
   const concurrency = resolveConcurrency(options?.concurrency);
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
+  /**
+   * Processes one record and records a batch item failure on error.
+   *
+   * @param record The SQS record to process.
+   */
   const handle = async (record: SQSRecord): Promise<void> => {
     const id = options?.mapMessageId?.(record) ?? record.messageId;
     try {
@@ -140,7 +174,18 @@ export const processPartialBatch = async (
 
 /**
  * Like {@link processPartialBatch}, but uses a Result-style callback (no throw for control flow).
- * If `processRecord` throws, the record is still treated as failed and `onRecordError` is invoked when set.
+ *
+ * - `{ ok: true }`: success (not listed in `batchItemFailures`)
+ * - `{ ok: false }`: failure; if `onRecordError` is set, it receives an `Error` whose
+ *   message includes the resolved `itemIdentifier`, and whose `cause` is `{ itemIdentifier }`
+ * - thrown errors: still treated as failures; `onRecordError` receives the thrown value when set
+ *
+ * @param event The SQS Lambda event.
+ * @param processRecord Per-record handler returning `{ ok: true }` or `{ ok: false }`.
+ * @param options Optional concurrency, error hook, and message id mapping.
+ * @returns An {@link SQSBatchResponse} listing only failed `itemIdentifier`s.
+ * @throws {RangeError} When `options.concurrency` is less than 1.
+ * @throws {TypeError} When `options.concurrency` is not a finite integer.
  */
 export const processPartialBatchWithResult = async (
   event: SQSEvent,
@@ -150,6 +195,11 @@ export const processPartialBatchWithResult = async (
   const concurrency = resolveConcurrency(options?.concurrency);
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
+  /**
+   * Processes one record; maps throws and `{ ok: false }` to batch item failures.
+   *
+   * @param record The SQS record to process.
+   */
   const handle = async (record: SQSRecord): Promise<void> => {
     const id = options?.mapMessageId?.(record) ?? record.messageId;
     let result: { ok: true } | { ok: false };
@@ -166,7 +216,9 @@ export const processPartialBatchWithResult = async (
       return;
     }
     if (options?.onRecordError) {
-      options.onRecordError(record, new Error('processRecord returned { ok: false }'));
+      const error = new Error(`processRecord returned { ok: false } (itemIdentifier=${id})`);
+      Object.assign(error, { cause: { itemIdentifier: id } });
+      options.onRecordError(record, error);
     }
     batchItemFailures.push(itemFailure(id));
   };

@@ -3,11 +3,11 @@ import { javascript, typescript, github } from 'projen';
 const project = new typescript.TypeScriptProject({
   defaultReleaseBranch: 'main',
   name: 'sqs-partial-batch-processor',
-  packageManager: javascript.NodePackageManager.YARN_CLASSIC,
+  packageManager: javascript.NodePackageManager.NPM,
   projenrcTs: true,
   authorName: 'yicr',
   authorEmail: 'yicr@users.noreply.github.com',
-  typescriptVersion: '5.9.x',
+  typescriptVersion: '6.0.x',
   repository: 'https://github.com/gammarers-aws-sdk-extensions/sqs-partial-batch-processor.git',
   description: 'A small TypeScript helper for AWS Lambda SQS triggers using partial batch responses (SQSBatchResponse.batchItemFailures). You supply per-record async logic; the library handles looping, per-record error boundaries, and the response shape.',
   keywords: [
