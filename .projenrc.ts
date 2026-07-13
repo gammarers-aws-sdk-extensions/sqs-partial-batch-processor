@@ -3,7 +3,7 @@ import { javascript, typescript, github } from 'projen';
 const project = new typescript.TypeScriptProject({
   defaultReleaseBranch: 'main',
   name: 'sqs-partial-batch-processor',
-  packageManager: javascript.NodePackageManager.YARN_CLASSIC,
+  packageManager: javascript.NodePackageManager.NPM,
   projenrcTs: true,
   authorName: 'yicr',
   authorEmail: 'yicr@users.noreply.github.com',
