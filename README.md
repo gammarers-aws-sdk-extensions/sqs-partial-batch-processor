@@ -8,13 +8,17 @@ You supply per-record async logic; the library handles looping, per-record error
 
 This library intentionally does **not** parse message bodies, validate schemas, create AWS SDK clients, or make retry/business decisions for you.
 
+Import the public API from the package root (`processPartialBatch`, `processPartialBatchWithResult`, `ProcessPartialBatchOptions`, `ProcessRecordResult`).
+
 ## Features
 
 - Implements Lambda SQS **partial batch response** pattern (only failed messages are retried).
 - Per-record error boundary (failures are isolated to each record).
 - Aggregates failed identifiers into `batchItemFailures` (defaults to `messageId`).
 - Throw-style (`processPartialBatch`) and Result-style (`processPartialBatchWithResult`) APIs.
+- Typed Result callback via `ProcessRecordResult` (`{ ok: true }` | `{ ok: false }`).
 - Optional bounded concurrency (`concurrency`), error hook (`onRecordError`), and custom `itemIdentifier` mapping (`mapMessageId`).
+- Shared options type `ProcessPartialBatchOptions` for both APIs.
 - For `{ ok: false }`, `onRecordError` receives an `Error` that includes the resolved `itemIdentifier` (message and `cause`) for easier debugging.
 
 ## Requirements
@@ -34,6 +38,10 @@ npm install sqs-partial-batch-processor
 yarn add sqs-partial-batch-processor
 ```
 
+```bash
+pnpm add sqs-partial-batch-processor
+```
+
 ## Usage
 
 Throw to mark a record as failed:
@@ -49,14 +57,21 @@ export const handler = async (event: SQSEvent) =>
   });
 ```
 
-Result-style callback (no throw for control flow):
+Result-style callback (no throw for control flow). Return a `ProcessRecordResult`:
+
+- `{ ok: true }`: success (not listed in `batchItemFailures`)
+- `{ ok: false }`: failure (listed in `batchItemFailures`)
+- thrown errors: still treated as failures
 
 ```ts
 import type { SQSEvent } from 'aws-lambda';
-import { processPartialBatchWithResult } from 'sqs-partial-batch-processor';
+import {
+  processPartialBatchWithResult,
+  type ProcessRecordResult,
+} from 'sqs-partial-batch-processor';
 
 export const handler = async (event: SQSEvent) =>
-  processPartialBatchWithResult(event, async (record) => {
+  processPartialBatchWithResult(event, async (record): Promise<ProcessRecordResult> => {
     if (record.body === '') {
       return { ok: false };
     }
@@ -66,7 +81,7 @@ export const handler = async (event: SQSEvent) =>
 
 ## Options
 
-Both `processPartialBatch` and `processPartialBatchWithResult` accept an optional `options` object:
+Both `processPartialBatch` and `processPartialBatchWithResult` accept an optional `ProcessPartialBatchOptions` object:
 
 - `concurrency?: number` (default: `1`): maximum parallelism. Must be a finite integer `>= 1` (`1` = sequential, `> 1` = bounded concurrency). If invalid, the function throws (`RangeError` for `< 1`, `TypeError` for non-integer / non-finite).
   - **Tip**: start with `1` and increase gradually while watching downstream limits (external API rate limits, DB connection pools, and Lambda reserved concurrency). SQS batches are typically small, so a large value rarely helps.
@@ -77,8 +92,8 @@ Both `processPartialBatch` and `processPartialBatchWithResult` accept an optiona
   - Example (structured log / metrics hook):
 
 ```ts
-import { processPartialBatch } from 'sqs-partial-batch-processor';
 import type { SQSEvent } from 'aws-lambda';
+import { processPartialBatch } from 'sqs-partial-batch-processor';
 
 export const handler = async (event: SQSEvent) =>
   processPartialBatch(
