@@ -1,15 +1,7 @@
 import type { SQSRecord } from 'aws-lambda';
 
 /**
- * Result of a per-record handler used by {@link processPartialBatchWithResult}.
- *
- * - `{ ok: true }`: success (not listed in `batchItemFailures`)
- * - `{ ok: false }`: failure (listed in `batchItemFailures`)
- */
-export type ProcessRecordResult = { ok: true } | { ok: false };
-
-/**
- * Options for {@link processPartialBatch} and {@link processPartialBatchWithResult}.
+ * Options for {@link processPartialBatch}.
  */
 export interface ProcessPartialBatchOptions {
   /**
@@ -25,12 +17,8 @@ export interface ProcessPartialBatchOptions {
   readonly concurrency?: number;
 
   /**
-   * Called when a record is treated as failed (thrown error or `{ ok: false }`).
+   * Called when a record handler throws.
    * Use for logging or metrics; the library does not write to `console` by default.
-   *
-   * For `{ ok: false }` from {@link processPartialBatchWithResult}, `error` is an `Error`
-   * whose message includes the resolved `itemIdentifier`, and whose `cause` is
-   * `{ itemIdentifier }` for structured logging.
    *
    * Do not log `record.body` as-is — it may contain secrets or personal data.
    * Prefer identifiers such as `record.messageId` (or your `mapMessageId` result)
@@ -42,7 +30,7 @@ export interface ProcessPartialBatchOptions {
    * falls back to `record.messageId`.
    *
    * @param record The failed SQS record.
-   * @param error The thrown value, or a synthesized `Error` when `{ ok: false }` was returned.
+   * @param error The value thrown by the record handler or by `mapMessageId`.
    */
   readonly onRecordError?: (record: SQSRecord, error: unknown) => void;
 
