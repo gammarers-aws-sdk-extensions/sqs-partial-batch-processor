@@ -1,7 +1,7 @@
 import type { SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
 import type { ProcessPartialBatchOptions, ProcessRecordResult } from '../types';
 import { resolveConcurrency, runWithConcurrency } from './concurrency';
-import { itemFailure } from './item-failure';
+import { reportRecordFailure } from './report-record-failure';
 
 /**
  * Like {@link processPartialBatch}, but uses a Result-style callback (no throw for control flow).
@@ -10,6 +10,10 @@ import { itemFailure } from './item-failure';
  * - `{ ok: false }`: failure; if `onRecordError` is set, it receives an `Error` whose
  *   message includes the resolved `itemIdentifier`, and whose `cause` is `{ itemIdentifier }`
  * - thrown errors: still treated as failures; `onRecordError` receives the thrown value when set
+ *
+ * Throws from `processRecord`, `mapMessageId`, and `onRecordError` stay inside
+ * the record that raised them. The returned promise still resolves. When
+ * `mapMessageId` throws, that record is reported with `record.messageId`.
  *
  * @param event The SQS Lambda event.
  * @param processRecord Per-record handler returning `{ ok: true }` or `{ ok: false }`.
@@ -28,30 +32,26 @@ export const processPartialBatchWithResult = async (
 
   /**
    * Processes one record; maps throws and `{ ok: false }` to batch item failures.
+   * Identifier resolution and the error hook stay inside this boundary.
    *
    * @param record The SQS record to process.
    */
   const handle = async (record: SQSRecord): Promise<void> => {
-    const id = options?.mapMessageId?.(record) ?? record.messageId;
-    let result: ProcessRecordResult;
+    let id = record.messageId;
+
     try {
-      result = await processRecord(record);
-    } catch (error) {
-      if (options?.onRecordError) {
-        options.onRecordError(record, error);
+      id = options?.mapMessageId?.(record) ?? record.messageId;
+      const result = await processRecord(record);
+      if (result.ok) {
+        return;
       }
-      batchItemFailures.push(itemFailure(id));
-      return;
-    }
-    if (result.ok) {
-      return;
-    }
-    if (options?.onRecordError) {
+
       const error = new Error(`processRecord returned { ok: false } (itemIdentifier=${id})`);
       Object.assign(error, { cause: { itemIdentifier: id } });
-      options.onRecordError(record, error);
+      reportRecordFailure(batchItemFailures, record, id, error, options?.onRecordError);
+    } catch (error) {
+      reportRecordFailure(batchItemFailures, record, id, error, options?.onRecordError);
     }
-    batchItemFailures.push(itemFailure(id));
   };
 
   if (concurrency <= 1) {

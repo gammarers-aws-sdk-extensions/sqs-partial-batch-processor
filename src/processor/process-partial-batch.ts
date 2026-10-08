@@ -1,11 +1,15 @@
 import type { SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
 import type { ProcessPartialBatchOptions } from '../types';
 import { resolveConcurrency, runWithConcurrency } from './concurrency';
-import { itemFailure } from './item-failure';
+import { reportRecordFailure } from './report-record-failure';
 
 /**
  * Runs `processRecord` for each SQS record. Thrown errors are mapped to
  * `batchItemFailures`; successful records are not listed.
+ *
+ * Throws from `processRecord`, `mapMessageId`, and `onRecordError` stay inside
+ * the record that raised them. The returned promise still resolves. When
+ * `mapMessageId` throws, that record is reported with `record.messageId`.
  *
  * @param event The SQS Lambda event.
  * @param processRecord Per-record handler. Throw to mark only that record as failed.
@@ -24,18 +28,18 @@ export const processPartialBatch = async (
 
   /**
    * Processes one record and records a batch item failure on error.
+   * Identifier resolution and the error hook stay inside this boundary.
    *
    * @param record The SQS record to process.
    */
   const handle = async (record: SQSRecord): Promise<void> => {
-    const id = options?.mapMessageId?.(record) ?? record.messageId;
+    let id = record.messageId;
+
     try {
+      id = options?.mapMessageId?.(record) ?? record.messageId;
       await processRecord(record);
     } catch (error) {
-      if (options?.onRecordError) {
-        options.onRecordError(record, error);
-      }
-      batchItemFailures.push(itemFailure(id));
+      reportRecordFailure(batchItemFailures, record, id, error, options?.onRecordError);
     }
   };
 
