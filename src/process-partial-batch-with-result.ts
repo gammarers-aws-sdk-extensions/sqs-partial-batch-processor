@@ -1,7 +1,7 @@
 import type { SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
-import type { ProcessPartialBatchOptions, ProcessRecordResult } from '../types';
-import { resolveConcurrency, runWithConcurrency } from './concurrency';
-import { reportRecordFailure } from './report-record-failure';
+import { runAtConcurrency } from './core/concurrency';
+import { reportRecordFailure } from './core/report-record-failure';
+import type { ProcessPartialBatchOptions, ProcessRecordResult } from './core/types';
 
 /**
  * Like {@link processPartialBatch}, but uses a Result-style callback (no throw for control flow).
@@ -19,15 +19,14 @@ import { reportRecordFailure } from './report-record-failure';
  * @param processRecord Per-record handler returning `{ ok: true }` or `{ ok: false }`.
  * @param options Optional concurrency, error hook, and message id mapping.
  * @returns An {@link SQSBatchResponse} listing only failed `itemIdentifier`s.
- * @throws {RangeError} When `options.concurrency` is less than 1.
- * @throws {TypeError} When `options.concurrency` is not a finite integer.
+ * @throws {@link SqsPartialBatchProcessorRangeError} When `options.concurrency` is less than 1.
+ * @throws {@link SqsPartialBatchProcessorTypeError} When `options.concurrency` is not a finite integer.
  */
 export const processPartialBatchWithResult = async (
   event: SQSEvent,
   processRecord: (record: SQSRecord) => Promise<ProcessRecordResult>,
   options?: ProcessPartialBatchOptions,
 ): Promise<SQSBatchResponse> => {
-  const concurrency = resolveConcurrency(options?.concurrency);
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
   /**
@@ -54,13 +53,6 @@ export const processPartialBatchWithResult = async (
     }
   };
 
-  if (concurrency <= 1) {
-    for (const record of event.Records) {
-      await handle(record);
-    }
-  } else {
-    await runWithConcurrency(event.Records, concurrency, handle);
-  }
-
+  await runAtConcurrency(event.Records, options?.concurrency, handle);
   return { batchItemFailures };
 };

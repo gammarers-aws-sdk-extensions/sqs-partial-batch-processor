@@ -1,7 +1,7 @@
 import type { SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
-import type { ProcessPartialBatchOptions } from '../types';
-import { resolveConcurrency, runWithConcurrency } from './concurrency';
-import { reportRecordFailure } from './report-record-failure';
+import { runAtConcurrency } from './core/concurrency';
+import { reportRecordFailure } from './core/report-record-failure';
+import type { ProcessPartialBatchOptions } from './core/types';
 
 /**
  * Runs `processRecord` for each SQS record. Thrown errors are mapped to
@@ -15,15 +15,14 @@ import { reportRecordFailure } from './report-record-failure';
  * @param processRecord Per-record handler. Throw to mark only that record as failed.
  * @param options Optional concurrency, error hook, and message id mapping.
  * @returns An {@link SQSBatchResponse} listing only failed `itemIdentifier`s.
- * @throws {RangeError} When `options.concurrency` is less than 1.
- * @throws {TypeError} When `options.concurrency` is not a finite integer.
+ * @throws {@link SqsPartialBatchProcessorRangeError} When `options.concurrency` is less than 1.
+ * @throws {@link SqsPartialBatchProcessorTypeError} When `options.concurrency` is not a finite integer.
  */
 export const processPartialBatch = async (
   event: SQSEvent,
   processRecord: (record: SQSRecord) => Promise<void>,
   options?: ProcessPartialBatchOptions,
 ): Promise<SQSBatchResponse> => {
-  const concurrency = resolveConcurrency(options?.concurrency);
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
   /**
@@ -43,13 +42,6 @@ export const processPartialBatch = async (
     }
   };
 
-  if (concurrency <= 1) {
-    for (const record of event.Records) {
-      await handle(record);
-    }
-  } else {
-    await runWithConcurrency(event.Records, concurrency, handle);
-  }
-
+  await runAtConcurrency(event.Records, options?.concurrency, handle);
   return { batchItemFailures };
 };

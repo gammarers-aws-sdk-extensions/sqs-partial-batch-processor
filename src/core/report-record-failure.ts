@@ -1,6 +1,6 @@
 import type { SQSBatchResponse, SQSRecord } from 'aws-lambda';
-import type { ProcessPartialBatchOptions } from '../types';
 import { itemFailure } from './item-failure';
+import type { ProcessPartialBatchOptions } from './types';
 
 /**
  * Reports one failed record inside the per-record boundary.

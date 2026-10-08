@@ -1,16 +1,25 @@
 import type { SQSRecord } from 'aws-lambda';
+import {
+  processPartialBatch,
+  SqsPartialBatchProcessorError,
+  SqsPartialBatchProcessorRangeError,
+  SqsPartialBatchProcessorTypeError,
+} from '../src';
 import { event, sqsRecord } from './sqs-event';
-import { processPartialBatch } from '../../src/processor/process-partial-batch';
 
 describe('processPartialBatch', () => {
-  it.each([0, -1, -10])('throws RangeError for invalid concurrency (%s)', async (c) => {
+  it.each([0, -1, -10])('throws SqsPartialBatchProcessorRangeError for invalid concurrency (%s)', async (c) => {
     const e = event(sqsRecord('a'));
-    await expect(processPartialBatch(e, async () => {}, { concurrency: c })).rejects.toThrow(RangeError);
+    const caught = await processPartialBatch(e, async () => {}, { concurrency: c }).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(SqsPartialBatchProcessorRangeError);
+    expect(caught).toBeInstanceOf(SqsPartialBatchProcessorError);
   });
 
-  it.each([0.5, Number.NaN, Number.POSITIVE_INFINITY])('throws TypeError for non-integer or non-finite concurrency (%s)', async (c) => {
+  it.each([0.5, Number.NaN, Number.POSITIVE_INFINITY])('throws SqsPartialBatchProcessorTypeError for non-integer or non-finite concurrency (%s)', async (c) => {
     const e = event(sqsRecord('a'));
-    await expect(processPartialBatch(e, async () => {}, { concurrency: c })).rejects.toThrow(TypeError);
+    const caught = await processPartialBatch(e, async () => {}, { concurrency: c }).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(SqsPartialBatchProcessorTypeError);
+    expect(caught).toBeInstanceOf(SqsPartialBatchProcessorError);
   });
 
   it('returns empty batchItemFailures when all records succeed', async () => {

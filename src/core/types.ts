@@ -19,8 +19,8 @@ export interface ProcessPartialBatchOptions {
    * - `> 1`: bounded concurrency pool (order of {@link SQSBatchResponse.batchItemFailures} is not guaranteed)
    *
    * @default 1
-   * @throws {RangeError} When `concurrency` is less than 1.
-   * @throws {TypeError} When `concurrency` is not a finite integer.
+   * @throws {@link SqsPartialBatchProcessorRangeError} When `concurrency` is less than 1.
+   * @throws {@link SqsPartialBatchProcessorTypeError} When `concurrency` is not a finite integer.
    */
   readonly concurrency?: number;
 
