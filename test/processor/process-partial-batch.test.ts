@@ -1,3 +1,4 @@
+import type { SQSRecord } from 'aws-lambda';
 import { event, sqsRecord } from './sqs-event';
 import { processPartialBatch } from '../../src/processor/process-partial-batch';
 
@@ -81,5 +82,87 @@ describe('processPartialBatch', () => {
       { mapMessageId: () => 'custom-id' },
     );
     expect(out.batchItemFailures).toEqual([{ itemIdentifier: 'custom-id' }]);
+  });
+
+  it.each([1, 3])('isolates a throwing mapMessageId (concurrency %s)', async (concurrency) => {
+    const onRecordError = jest.fn();
+    const mapError = new Error('map failed');
+    const seen: string[] = [];
+    const ids = ['r1', 'r2', 'r3', 'r4', 'r5'];
+    const e = event(...ids.map((id) => sqsRecord(id)));
+    const out = await processPartialBatch(
+      e,
+      async (r) => {
+        seen.push(r.messageId);
+      },
+      {
+        concurrency,
+        onRecordError,
+        mapMessageId: (r) => {
+          if (r.messageId === 'r2') {
+            throw mapError;
+          }
+          return `app:${r.messageId}`;
+        },
+      },
+    );
+    expect(out.batchItemFailures).toEqual([{ itemIdentifier: 'r2' }]);
+    expect(onRecordError).toHaveBeenCalledTimes(1);
+    expect(onRecordError.mock.calls[0]?.[0].messageId).toBe('r2');
+    expect(onRecordError.mock.calls[0]?.[1]).toBe(mapError);
+    expect(new Set(seen)).toEqual(new Set(['r1', 'r3', 'r4', 'r5']));
+  });
+
+  it.each([1, 3])('keeps the resolved itemIdentifier when onRecordError throws (concurrency %s)', async (concurrency) => {
+    const seen: string[] = [];
+    const ids = ['r1', 'r2', 'r3', 'r4', 'r5'];
+    const e = event(...ids.map((id) => sqsRecord(id)));
+    const out = await processPartialBatch(
+      e,
+      async (r) => {
+        seen.push(r.messageId);
+        if (r.messageId === 'r4') {
+          throw new Error('boom');
+        }
+      },
+      {
+        concurrency,
+        mapMessageId: (r) => `app:${r.messageId}`,
+        onRecordError: () => {
+          throw new Error('hook failed');
+        },
+      },
+    );
+    expect(out.batchItemFailures).toEqual([{ itemIdentifier: 'app:r4' }]);
+    expect(new Set(seen)).toEqual(new Set(ids));
+  });
+
+  it.each([1, 3])('reports messageId once when mapMessageId and onRecordError both throw (concurrency %s)', async (concurrency) => {
+    const onRecordError = jest.fn((_record: SQSRecord, _error: unknown) => {
+      throw new Error('hook failed');
+    });
+    const ids = ['r1', 'r2', 'r3'];
+    const seen: string[] = [];
+    const e = event(...ids.map((id) => sqsRecord(id)));
+    const out = await processPartialBatch(
+      e,
+      async (r) => {
+        seen.push(r.messageId);
+      },
+      {
+        concurrency,
+        onRecordError,
+        mapMessageId: (r) => {
+          if (r.messageId === 'r2') {
+            throw new Error('map failed');
+          }
+          return `app:${r.messageId}`;
+        },
+      },
+    );
+    expect(out.batchItemFailures).toEqual([{ itemIdentifier: 'r2' }]);
+    expect(onRecordError).toHaveBeenCalledTimes(1);
+    expect(onRecordError.mock.calls[0]?.[1]).toMatchObject({ message: 'map failed' });
+    expect(new Set(seen)).toEqual(new Set(['r1', 'r3']));
   });
 });
