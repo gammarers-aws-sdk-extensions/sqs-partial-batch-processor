@@ -4,6 +4,7 @@ import {
   isGroupInFlight,
   isSequentialConcurrency,
   MIN_CONCURRENCY,
+  WorkerHold,
 } from './concurrency-predicates';
 import { SqsPartialBatchProcessorRangeError, SqsPartialBatchProcessorTypeError } from './errors';
 
@@ -179,6 +180,19 @@ export const runWithGroupConcurrency = async <T>(
     waiters.push(resolve);
   });
 
+  /**
+   * Maps a claimed record to the worker hold used by the loop predicate.
+   *
+   * @param current The record this worker holds, or `undefined` when it has none.
+   * @returns {@link WorkerHold.Holding} when `current` is present, otherwise {@link WorkerHold.Idle}.
+   */
+  const workerHold = (current: GroupWork<T> | undefined): WorkerHold => {
+    if (current === undefined) {
+      return WorkerHold.Idle;
+    }
+    return WorkerHold.Holding;
+  };
+
   const limit = Math.min(concurrency, items.length);
   const workers: Promise<void>[] = [];
 
@@ -186,7 +200,7 @@ export const runWithGroupConcurrency = async <T>(
     workers.push((async () => {
       let claimed = claim();
 
-      while (hasQueuedGroupWork(claimed !== undefined, pending.length)) {
+      while (hasQueuedGroupWork(workerHold(claimed), pending.length)) {
         if (claimed === undefined) {
           await parkUntilReleased();
           claimed = claim();

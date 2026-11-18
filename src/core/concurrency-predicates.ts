@@ -36,14 +36,29 @@ export const isGroupInFlight = (
 ): boolean => groupKey !== undefined && inFlightGroups.has(groupKey);
 
 /**
+ * Whether a group-pool worker currently holds a record.
+ */
+export enum WorkerHold {
+  /**
+   * The worker has claimed a record.
+   */
+  Holding = 'holding',
+
+  /**
+   * The worker has no record.
+   */
+  Idle = 'idle',
+}
+
+/**
  * Returns whether a group-pool worker should keep looping.
  *
  * The worker continues when it already holds a record, or when other records
  * are still waiting for a busy group to finish.
  *
- * @param claimed Whether this worker currently holds a record.
+ * @param hold Whether this worker currently holds a record.
  * @param pendingCount Records not yet claimed.
  * @returns `true` when the worker should claim, wait, or process.
  */
-export const hasQueuedGroupWork = (claimed: boolean, pendingCount: number): boolean =>
-  claimed || pendingCount > 0;
+export const hasQueuedGroupWork = (hold: WorkerHold, pendingCount: number): boolean =>
+  hold === WorkerHold.Holding || pendingCount > 0;

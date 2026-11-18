@@ -3,6 +3,7 @@ import {
   hasRemainingWork,
   isGroupInFlight,
   isSequentialConcurrency,
+  WorkerHold,
 } from '../../src/core/concurrency-predicates';
 
 describe('isSequentialConcurrency', () => {
@@ -43,11 +44,11 @@ describe('isGroupInFlight', () => {
 
 describe('hasQueuedGroupWork', () => {
   it.each([
-    [false, 0, false],
-    [true, 0, true],
-    [false, 2, true],
-    [true, 3, true],
-  ] as const)('claimed %s with %s pending has work: %s', (claimed, pendingCount, expected) => {
-    expect(hasQueuedGroupWork(claimed, pendingCount)).toBe(expected);
+    [WorkerHold.Idle, 0, false],
+    [WorkerHold.Holding, 0, true],
+    [WorkerHold.Idle, 2, true],
+    [WorkerHold.Holding, 3, true],
+  ] as const)('hold %s with %s pending has work: %s', (hold, pendingCount, expected) => {
+    expect(hasQueuedGroupWork(hold, pendingCount)).toBe(expected);
   });
 });
