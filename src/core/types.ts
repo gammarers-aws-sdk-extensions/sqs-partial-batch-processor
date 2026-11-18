@@ -8,7 +8,13 @@ export interface ProcessPartialBatchOptions {
    * Maximum number of records processed in parallel.
    *
    * - `1`: sequential processing
-   * - `> 1`: bounded concurrency pool (order of {@link SQSBatchResponse.batchItemFailures} is not guaranteed)
+   * - `> 1`: bounded concurrency pool. Records that share a `MessageGroupId`
+   *   still run one at a time. The order of {@link SQSBatchResponse.batchItemFailures}
+   *   is not guaranteed.
+   *
+   * Records with the same `MessageGroupId` run one at a time at every value,
+   * including `1`. After the first failure in that group, later records in the
+   * group are included in `batchItemFailures` and their handlers are not called.
    *
    * @default 1
    * @throws {@link SqsPartialBatchProcessorRangeError} When `concurrency` is less than 1.
@@ -29,6 +35,10 @@ export interface ProcessPartialBatchOptions {
    * When `mapMessageId` throws, `error` is that thrown value and the identifier
    * falls back to `record.messageId`.
    *
+   * Records skipped because an earlier record in the same message group failed
+   * are listed in `batchItemFailures` and do not call this hook, unless
+   * `mapMessageId` throws while resolving their identifier.
+   *
    * @param record The failed SQS record.
    * @param error The value thrown by the record handler or by `mapMessageId`.
    */
@@ -39,8 +49,11 @@ export interface ProcessPartialBatchOptions {
    * Defaults to `record.messageId` when omitted.
    *
    * When this function throws, that record is reported with `record.messageId`
-   * and the remaining records are still processed. The thrown value is passed
-   * to `onRecordError` when the hook is set.
+   * and the thrown value is passed to `onRecordError` when the hook is set.
+   * Later records in the same `MessageGroupId` are reported as failures and
+   * their handlers are not called. Records in other groups are still processed.
+   * A record skipped after an earlier group failure still uses this function
+   * for its identifier. A throw there reports `record.messageId`.
    *
    * @param record The SQS record being processed.
    * @returns The identifier sent back to Lambda in `batchItemFailures`.

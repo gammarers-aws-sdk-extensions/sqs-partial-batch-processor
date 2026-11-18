@@ -20,3 +20,30 @@ export const isSequentialConcurrency = (concurrency: number): boolean =>
  */
 export const hasRemainingWork = (workIndex: number | undefined): workIndex is number =>
   workIndex !== undefined;
+
+/**
+ * Returns whether a group already has a record in flight.
+ *
+ * An `undefined` key is not a group, so those records are never blocked.
+ *
+ * @param groupKey Group key for the candidate record.
+ * @param inFlightGroups Groups that currently have a record running.
+ * @returns `true` when this record must wait for an earlier record in the group.
+ */
+export const isGroupInFlight = (
+  groupKey: string | undefined,
+  inFlightGroups: ReadonlySet<string>,
+): boolean => groupKey !== undefined && inFlightGroups.has(groupKey);
+
+/**
+ * Returns whether a group-pool worker should keep looping.
+ *
+ * The worker continues when it already holds a record, or when other records
+ * are still waiting for a busy group to finish.
+ *
+ * @param claimed Whether this worker currently holds a record.
+ * @param pendingCount Records not yet claimed.
+ * @returns `true` when the worker should claim, wait, or process.
+ */
+export const hasQueuedGroupWork = (claimed: boolean, pendingCount: number): boolean =>
+  claimed || pendingCount > 0;
