@@ -11,15 +11,20 @@ You supply per-record async logic; the library handles looping, per-record error
 ## Features
 
 - Implements the Lambda SQS partial batch response pattern, so only failed messages are retried.
-- Keeps a failure inside the record that raised it.
+- Keeps a thrown error inside the record boundary that raised it.
 - Aggregates failed identifiers into `batchItemFailures` (defaults to `messageId`).
+- Preserves FIFO order inside a `MessageGroupId`. The first failure in a group also reports every later record in that group, and those handlers are not called. The same group runs one record at a time when `concurrency` is greater than 1. Records without a group id still fail independently.
 - Marks a record failed by throwing from the per-record function passed to `processPartialBatch`.
-- Accepts bounded concurrency (`concurrency`), an error hook (`onRecordError`), and custom `itemIdentifier` mapping (`mapMessageId`) through `ProcessPartialBatchOptions`.
-- Throws `SqsPartialBatchProcessorRangeError` or `SqsPartialBatchProcessorTypeError` for invalid `concurrency`. Check the subclass before `SqsPartialBatchProcessorError`.
+- Accepts bounded concurrency (`concurrency`), a per-record limit (`recordTimeoutMs`), an error hook (`onRecordError`), and custom `itemIdentifier` mapping (`mapMessageId`) through `ProcessPartialBatchOptions`.
+- Throws `SqsPartialBatchProcessorRangeError` or `SqsPartialBatchProcessorTypeError` for an invalid `concurrency` or `recordTimeoutMs`. Check the subclass before `SqsPartialBatchProcessorError`.
 
 ## How it works
 
-An SQS event source mapping invokes your Lambda function with a batch of records. Pass that event and a per-record function to `processPartialBatch`. Throw from that function to fail one record. The returned `SQSBatchResponse` lists failed records in `batchItemFailures`. Enable **Report batch item failures** on the event source mapping so SQS retries those messages and deletes the successful ones. See the [AWS Lambda SQS error handling docs](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html#services-sqs-batchfailurereporting).
+An SQS event source mapping invokes your Lambda function with a batch of records. Pass that event and a per-record function to `processPartialBatch`. Throw from that function to fail that record. The returned `SQSBatchResponse` lists failed records in `batchItemFailures`. Enable **Report batch item failures** on the event source mapping so SQS retries those messages and deletes the successful ones. See the [AWS Lambda SQS error handling docs](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html#services-sqs-batchfailurereporting).
+
+Records with the same `MessageGroupId` stay in batch order. A failure reports that record and every later record in the group, and the later handlers do not run. Those later identifiers still come from `mapMessageId` when it is set. Earlier records in the group are left out of `batchItemFailures`, so SQS can delete them. Other groups keep running. This holds for `concurrency` of 1 and for higher values. A higher value still runs each group one record at a time and can run different groups in parallel. Records with no group id fail on their own.
+
+Pass `recordTimeoutMs` to limit how long each record handler may run. When a handler does not settle in that many milliseconds, the processor stops waiting, reports `SqsPartialBatchProcessorTimeoutError` for that record, and continues with the other records. A timed-out record is a failure, so later records in the same `MessageGroupId` are also reported and their handlers are not called. The handler call itself is not cancelled. If it still holds sockets or timers, the Lambda runtime can keep the invocation open until the function timeout while the event loop is not empty.
 
 Your function owns message parsing, schema validation, AWS SDK clients, and retry policy. The package is published as CommonJS (`lib/index.js`) and can be imported from CommonJS or ESM.
 
@@ -60,6 +65,20 @@ export const handler = async (event: SQSEvent) =>
   });
 ```
 
+Limit how long one record may run. The record that exceeds `recordTimeoutMs` is the one listed in `batchItemFailures`.
+
+```ts
+import type { SQSEvent } from 'aws-lambda';
+import { processPartialBatch } from 'sqs-partial-batch-processor';
+
+export const handler = async (event: SQSEvent) =>
+  processPartialBatch(event, async (record) => {
+    // Throw, or exceed recordTimeoutMs, to fail this record.
+  }, {
+    recordTimeoutMs: 1000,
+  });
+```
+
 `onRecordError` is a logging or metrics hook. A throw from the hook stays on that record.
 
 ```ts
@@ -92,9 +111,10 @@ export const handler = async (event: SQSEvent) =>
 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
-| `concurrency` | `number` | `1` | Maximum number of records processed in parallel. `1` runs records one at a time. A value greater than `1` uses a bounded pool, and the order of `batchItemFailures` is not guaranteed. The value must be a finite integer greater than or equal to 1. A smaller value throws `SqsPartialBatchProcessorRangeError`. Any other invalid value throws `SqsPartialBatchProcessorTypeError`. Check the subclass before `SqsPartialBatchProcessorError`. Start with `1` and raise it while watching downstream limits such as API rate limits, database pools, and Lambda reserved concurrency. |
-| `onRecordError` | `(record, error) => void` |  | Called when a record handler throws. A throw from this hook leaves that record in `batchItemFailures` and lets the other records continue. Avoid logging `record.body`. Prefer `messageId`, the `mapMessageId` result, and a sanitized error summary. When `mapMessageId` throws, `error` is that thrown value and the reported identifier is `record.messageId`. |
-| `mapMessageId` | `(record) => string` | `record.messageId` | Returns the `itemIdentifier` reported for a record. Use it to align the identifier with an application-level id, such as one stored in `messageAttributes` or the parsed payload. When this function throws, that record is reported with `record.messageId` and the remaining records are still processed. |
+| `concurrency` | `number` | `1` | Maximum number of records processed in parallel. `1` runs records one at a time. A value greater than `1` uses a bounded pool, and the order of `batchItemFailures` is not guaranteed. Records that share a `MessageGroupId` run one at a time at any concurrency. After the first failure in that group, later records in the group are included in `batchItemFailures` and their handlers are not called. The value must be a finite integer greater than or equal to 1. A smaller value throws `SqsPartialBatchProcessorRangeError`. Any other invalid value throws `SqsPartialBatchProcessorTypeError`. Check the subclass before `SqsPartialBatchProcessorError`. Start with `1` and raise it while watching downstream limits such as API rate limits, database pools, and Lambda reserved concurrency. |
+| `onRecordError` | `(record, error) => void` |  | Called when a record handler or `mapMessageId` throws, and when a record exceeds `recordTimeoutMs`. A throw from this hook leaves that record in `batchItemFailures` and lets records outside that message group continue. Avoid logging `record.body`. Prefer `messageId`, the `mapMessageId` result, and a sanitized error summary. When `mapMessageId` throws, `error` is that thrown value and the reported identifier is `record.messageId`. Later records skipped because an earlier record in the same group failed do not call this hook, unless `mapMessageId` throws while resolving their identifier. |
+| `recordTimeoutMs` | `number` |  | Maximum milliseconds to wait for one record handler. Omit it to wait until the handler settles. When the handler does not settle in time, that record is listed in `batchItemFailures` with `SqsPartialBatchProcessorTimeoutError` and the other records still run. The handler call is not cancelled. If it still holds sockets or timers, the Lambda runtime can keep the invocation open until the function timeout while the event loop is not empty. A timed-out record counts as a group failure, so later records in the same `MessageGroupId` are also reported and their handlers are not called. The value must be a finite integer greater than or equal to 1. A smaller value throws `SqsPartialBatchProcessorRangeError`. Any other invalid value throws `SqsPartialBatchProcessorTypeError`. Check the subclass before `SqsPartialBatchProcessorError`. |
+| `mapMessageId` | `(record) => string` | `record.messageId` | Returns the `itemIdentifier` reported for a record. Use it to align the identifier with an application-level id, such as one stored in `messageAttributes` or the parsed payload. When this function throws, that record is reported with `record.messageId` and the thrown value is passed to `onRecordError`. Later records in the same message group are reported as failures without calling the handler. Records in other groups are still processed. A skipped later record still uses this function for its `itemIdentifier`. A throw there reports `record.messageId`. |
 
 ## Requirements
 

@@ -1,4 +1,10 @@
-import { hasRemainingWork, isSequentialConcurrency } from '../../src/core/concurrency-predicates';
+import {
+  hasQueuedGroupWork,
+  hasRemainingWork,
+  isGroupInFlight,
+  isSequentialConcurrency,
+  WorkerHold,
+} from '../../src/core/concurrency-predicates';
 
 describe('isSequentialConcurrency', () => {
   it.each([
@@ -19,5 +25,30 @@ describe('hasRemainingWork', () => {
     [4, true],
   ] as const)('work index %s has remaining work: %s', (workIndex, expected) => {
     expect(hasRemainingWork(workIndex)).toBe(expected);
+  });
+});
+
+describe('isGroupInFlight', () => {
+  it.each([
+    [undefined, [] as const, false],
+    [undefined, ['A'] as const, false],
+    ['A', [] as const, false],
+    ['A', ['B'] as const, false],
+    ['A', ['A'] as const, true],
+    ['A', ['A', 'B'] as const, true],
+    ['', [''] as const, true],
+  ])('group %s held in %s is in flight: %s', (groupKey, held, expected) => {
+    expect(isGroupInFlight(groupKey, new Set(held))).toBe(expected);
+  });
+});
+
+describe('hasQueuedGroupWork', () => {
+  it.each([
+    [WorkerHold.Idle, 0, false],
+    [WorkerHold.Holding, 0, true],
+    [WorkerHold.Idle, 2, true],
+    [WorkerHold.Holding, 3, true],
+  ] as const)('hold %s with %s pending has work: %s', (hold, pendingCount, expected) => {
+    expect(hasQueuedGroupWork(hold, pendingCount)).toBe(expected);
   });
 });
