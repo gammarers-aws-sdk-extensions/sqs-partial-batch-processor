@@ -39,7 +39,8 @@ export interface ProcessPartialBatchOptions {
   readonly recordTimeoutMs?: number;
 
   /**
-   * Called when a record handler throws, and when a record exceeds `recordTimeoutMs`.
+   * Called when a record handler or `mapMessageId` throws, and when a record
+   * exceeds `recordTimeoutMs`.
    * Use for logging or metrics; the library does not write to `console` by default.
    *
    * Do not log `record.body` as-is — it may contain secrets or personal data.

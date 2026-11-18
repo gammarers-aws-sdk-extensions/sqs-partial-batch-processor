@@ -50,8 +50,9 @@ export class SqsPartialBatchProcessorTypeError extends SqsPartialBatchProcessorE
 /**
  * Reported when a record handler does not finish within `recordTimeoutMs`.
  *
- * {@link processPartialBatch} catches this for that record, lists the record
- * in `batchItemFailures`, and continues with the other records.
+ * {@link processPartialBatch} catches this for that record and lists it in
+ * `batchItemFailures`. Later records in the same `MessageGroupId` are reported
+ * and their handlers are not called. Records outside that group still run.
  */
 export class SqsPartialBatchProcessorTimeoutError extends SqsPartialBatchProcessorError {
   override readonly name: string = 'SqsPartialBatchProcessorTimeoutError';

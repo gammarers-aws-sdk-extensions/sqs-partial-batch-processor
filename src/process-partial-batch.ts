@@ -22,8 +22,10 @@ import type { ProcessPartialBatchOptions } from './core/types';
  * independently.
  *
  * `recordTimeoutMs` limits how long the processor waits for one handler. On
- * expiry that record fails with {@link SqsPartialBatchProcessorTimeoutError}
- * and the other records still run. The handler call is not cancelled.
+ * expiry that record fails with {@link SqsPartialBatchProcessorTimeoutError}.
+ * Later records in the same `MessageGroupId` are reported and their handlers
+ * are not called. Records outside that group still run. The handler call is
+ * not cancelled.
  *
  * @param event The SQS Lambda event.
  * @param processRecord Per-record handler. Throw to mark only that record as failed.
