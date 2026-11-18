@@ -23,7 +23,23 @@ export interface ProcessPartialBatchOptions {
   readonly concurrency?: number;
 
   /**
-   * Called when a record handler throws.
+   * Maximum time to wait for one record handler, in milliseconds.
+   *
+   * When the handler does not settle in time, that record is listed in
+   * `batchItemFailures` with {@link SqsPartialBatchProcessorTimeoutError} and
+   * the other records still run. The handler call is not cancelled. Omit this
+   * option to wait until the handler settles.
+   *
+   * A timed-out record is a group failure. Later records that share its
+   * `MessageGroupId` are reported and their handlers are not called.
+   *
+   * @throws {@link SqsPartialBatchProcessorRangeError} When `recordTimeoutMs` is less than 1.
+   * @throws {@link SqsPartialBatchProcessorTypeError} When `recordTimeoutMs` is not a finite integer.
+   */
+  readonly recordTimeoutMs?: number;
+
+  /**
+   * Called when a record handler throws, and when a record exceeds `recordTimeoutMs`.
    * Use for logging or metrics; the library does not write to `console` by default.
    *
    * Do not log `record.body` as-is — it may contain secrets or personal data.
@@ -40,7 +56,8 @@ export interface ProcessPartialBatchOptions {
    * `mapMessageId` throws while resolving their identifier.
    *
    * @param record The failed SQS record.
-   * @param error The value thrown by the record handler or by `mapMessageId`.
+   * @param error The value thrown by the record handler or by `mapMessageId`,
+   * or a {@link SqsPartialBatchProcessorTimeoutError} when the record exceeds `recordTimeoutMs`.
    */
   readonly onRecordError?: (record: SQSRecord, error: unknown) => void;
 
